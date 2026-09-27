@@ -9,13 +9,17 @@ def configurazione_istanza():
         tenant = st.secrets.get("tenant", {})
         tenant_id = str(tenant.get("id", "") or "").strip()
         nome = str(tenant.get("nome", "") or "").strip()
+        admin_user = str(tenant.get("admin_user", "admin") or "admin").strip().lower()
+        admin_name = str(tenant.get("admin_name", "Amministratore cliente") or "Amministratore cliente").strip()
+        admin_password = str(tenant.get("admin_password", "") or "")
     except Exception:
-        tenant_id, nome = "", ""
+        tenant_id, nome, admin_user, admin_name, admin_password = "", "", "admin", "Papà", ""
     tenant_id = re.sub(r"[^a-zA-Z0-9_-]+", "-", tenant_id).strip("-").lower()
-    return tenant_id, nome
+    admin_user = re.sub(r"[^a-zA-Z0-9_.@-]+", "", admin_user) or "admin"
+    return tenant_id, nome, admin_user, admin_name, admin_password
 
 
-TENANT_ID, TENANT_NAME = configurazione_istanza()
+TENANT_ID, TENANT_NAME, TENANT_ADMIN_USER, TENANT_ADMIN_NAME, TENANT_ADMIN_PASSWORD = configurazione_istanza()
 APP_TITLE = f"Gestionale Famiglia · {TENANT_NAME}" if TENANT_NAME else "Gestionale Famiglia"
 LIVE_DB_FILENAME = f"gestionale_famiglia_{TENANT_ID}_live.json" if TENANT_ID else "gestionale_famiglia_live.json"
 BACKUP_PREFIX = f"gestionale_famiglia_{TENANT_ID}" if TENANT_ID else "gestionale_famiglia"
@@ -58,14 +62,18 @@ def password_ok(password, encoded):
         return False
 
 def nuovo_db():
-    utenti = [
-        ("admin", "Papà", "amministratore", "admin123"),
-        ("mamma", "Mamma", "amministratore", "mamma123"),
-        ("figlia24", "Sofia", "adulto", "figlia24123"),
-        ("figlia17", "Emma", "figlio", "figlia17123"),
-        ("figlia10", "Sonia", "figlio", "figlia10123"),
-    ]
-    db = {"versione": 3, "istanza_id": TENANT_ID, "famiglia": TENANT_NAME or "La nostra famiglia", "utenti": {}, "album_drive": {}, "config": {"drive_folder_id": "", "budget_mensile": 0.0, "ultimo_backup_giornaliero": ""}}
+    if TENANT_ID:
+        utenti = [(TENANT_ADMIN_USER, TENANT_ADMIN_NAME, "amministratore",
+                   TENANT_ADMIN_PASSWORD or "CAMBIA-SUBITO-PASSWORD")]
+    else:
+        utenti = [
+            ("admin", "Papà", "amministratore", "admin123"),
+            ("mamma", "Mamma", "amministratore", "mamma123"),
+            ("figlia24", "Sofia", "adulto", "figlia24123"),
+            ("figlia17", "Emma", "figlio", "figlia17123"),
+            ("figlia10", "Sonia", "figlio", "figlia10123"),
+        ]
+    db = {"versione": 4, "istanza_id": TENANT_ID, "tenant_bootstrap_done": bool(TENANT_ID), "famiglia": TENANT_NAME or "La nostra famiglia", "utenti": {}, "album_drive": {}, "config": {"drive_folder_id": "", "budget_mensile": 0.0, "ultimo_backup_giornaliero": ""}}
     for username, nome, ruolo, pwd in utenti:
         db["utenti"][username] = {"nome": nome, "ruolo": ruolo, "password": password_hash(pwd), "attivo": True}
     for c in COLLEZIONI: db[c] = []
@@ -89,6 +97,22 @@ def carica():
     for c in COLLEZIONI: db.setdefault(c, [])
     db.setdefault("utenti", {})
     db.setdefault("istanza_id", TENANT_ID)
+    # Le istanze cliente create con la V1 contenevano ancora gli utenti demo
+    # della famiglia originale. La prima esecuzione V2 li sostituisce con il
+    # solo amministratore definito nei Secrets dell'istanza.
+    if TENANT_ID and not db.get("tenant_bootstrap_done"):
+        db["utenti"] = {
+            TENANT_ADMIN_USER: {
+                "nome": TENANT_ADMIN_NAME,
+                "ruolo": "amministratore",
+                "password": password_hash(TENANT_ADMIN_PASSWORD or "CAMBIA-SUBITO-PASSWORD"),
+                "attivo": True,
+            }
+        }
+        db["famiglia"] = TENANT_NAME or db.get("famiglia", "Cliente")
+        db["istanza_id"] = TENANT_ID
+        db["tenant_bootstrap_done"] = True
+        salva(db, sincronizza=False)
     # Aggiorna i precedenti nomi generici mantenendo account, password e dati esistenti.
     nomi_figlie = {"24": "Sofia", "17": "Emma", "10": "Sonia"}
     anagrafica_aggiornata = False
@@ -1316,7 +1340,13 @@ def login(db):
         if info and info.get("attivo", True) and password_ok(pwd, info.get("password", "")):
             st.session_state.update(username=user, ruolo=info["ruolo"], autenticato=True); st.rerun()
         st.error("Credenziali non valide.")
-    st.warning("Primo accesso: admin / admin123. Cambia subito la password da Amministrazione.")
+    if TENANT_ID:
+        if not TENANT_ADMIN_PASSWORD:
+            st.error("Configura admin_password nella sezione [tenant] dei Secrets prima di utilizzare questa istanza.")
+        else:
+            st.info(f"Primo accesso configurato per l'utente: {TENANT_ADMIN_USER}")
+    else:
+        st.warning("Primo accesso: admin / admin123. Cambia subito la password da Amministrazione.")
 
 def dashboard(db):
     st.title("📊 Dashboard familiare")
