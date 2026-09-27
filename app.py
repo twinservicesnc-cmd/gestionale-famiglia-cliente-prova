@@ -73,7 +73,10 @@ def nuovo_db():
             ("figlia17", "Emma", "figlio", "figlia17123"),
             ("figlia10", "Sonia", "figlio", "figlia10123"),
         ]
-    db = {"versione": 4, "istanza_id": TENANT_ID, "tenant_bootstrap_done": bool(TENANT_ID), "famiglia": TENANT_NAME or "La nostra famiglia", "utenti": {}, "album_drive": {}, "config": {"drive_folder_id": "", "budget_mensile": 0.0, "ultimo_backup_giornaliero": ""}}
+    db = {"versione": 5, "istanza_id": TENANT_ID, "tenant_bootstrap_done": bool(TENANT_ID),
+          "tenant_admin_configured": bool(TENANT_ID and TENANT_ADMIN_PASSWORD),
+          "famiglia": TENANT_NAME or "La nostra famiglia", "utenti": {}, "album_drive": {},
+          "config": {"drive_folder_id": "", "budget_mensile": 0.0, "ultimo_backup_giornaliero": ""}}
     for username, nome, ruolo, pwd in utenti:
         db["utenti"][username] = {"nome": nome, "ruolo": ruolo, "password": password_hash(pwd), "attivo": True}
     for c in COLLEZIONI: db[c] = []
@@ -100,7 +103,7 @@ def carica():
     # Le istanze cliente create con la V1 contenevano ancora gli utenti demo
     # della famiglia originale. La prima esecuzione V2 li sostituisce con il
     # solo amministratore definito nei Secrets dell'istanza.
-    if TENANT_ID and not db.get("tenant_bootstrap_done"):
+    if TENANT_ID and TENANT_ADMIN_PASSWORD and not db.get("tenant_admin_configured"):
         db["utenti"] = {
             TENANT_ADMIN_USER: {
                 "nome": TENANT_ADMIN_NAME,
@@ -112,6 +115,7 @@ def carica():
         db["famiglia"] = TENANT_NAME or db.get("famiglia", "Cliente")
         db["istanza_id"] = TENANT_ID
         db["tenant_bootstrap_done"] = True
+        db["tenant_admin_configured"] = True
         salva(db, sincronizza=False)
     # Aggiorna i precedenti nomi generici mantenendo account, password e dati esistenti.
     nomi_figlie = {"24": "Sofia", "17": "Emma", "10": "Sonia"}
